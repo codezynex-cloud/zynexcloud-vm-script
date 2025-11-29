@@ -1,378 +1,632 @@
 #!/bin/bash
 
-# 🚀 ZynexCloud VM Manager - FIXED VERSION
-# Disk size issue resolved
+# =============================================
+# ZynexCloud Virtual Machine Manager
+# Professional Edition v3.0
+# Secure • Reliable • Enterprise Ready
+# =============================================
 
 set -e
 
-# 🎨 Colors + Emojis
+# Configuration
+VM_DIR="${HOME}/.zynexcloud/vms"
+LOG_DIR="${HOME}/.zynexcloud/logs"
+CONFIG_DIR="${HOME}/.zynexcloud/config"
+OS_IMAGES_DIR="${HOME}/.zynexcloud/images"
+
+# Initialize directories
+mkdir -p "${VM_DIR}" "${LOG_DIR}" "${CONFIG_DIR}" "${OS_IMAGES_DIR}"
+
+# Color scheme
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m'
 
-# 🔧 Config
-VM_DIR="$HOME/zynex-vms"
-mkdir -p "$VM_DIR"
+# Logging functions
+log_info() { echo -e "${BLUE}ℹ ${NC} $1"; }
+log_success() { echo -e "${GREEN}✅ ${NC} $1"; }
+log_warning() { echo -e "${YELLOW}⚠ ${NC} $1"; }
+log_error() { echo -e "${RED}❌ ${NC} $1"; }
 
-# 🎯 Display Awesome Header
-display_header() {
-    clear
-    echo -e "${PURPLE}"
-    echo "╔════════════════════════════════════════╗"
-    echo "║           🚀 ZYNEXCLOUD VM            ║"
-    echo "║           🛡️  Premium Edition         ║"
-    echo "║    24/7 • Anti-Suspend • Fast         ║"
-    echo "╚════════════════════════════════════════╝"
-    echo -e "${NC}"
-    echo -e "${CYAN}    Your Ultimate Virtualization Solution${NC}"
-    echo
-}
+# Operating System Options
+declare -A OS_OPTIONS=(
+    ["ubuntu22"]="Ubuntu 22.04 LTS|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img|ubuntu|ubuntu"
+    ["ubuntu24"]="Ubuntu 24.04 LTS|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img|ubuntu|ubuntu"
+    ["debian12"]="Debian 12|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2|debian|debian"
+    ["centos9"]="CentOS Stream 9|https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2|centos|centos"
+    ["alma9"]="AlmaLinux 9|https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2|alma|alma"
+    ["rocky9"]="Rocky Linux 9|https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2|rocky|rocky"
+)
 
-# 🔍 Check Dependencies
-check_deps() {
-    echo -e "🔍 ${BLUE}Checking dependencies...${NC}"
-    local deps=("qemu-system-x86_64" "qemu-img")
-    local missing=()
+# System checks
+check_system() {
+    log_info "Performing system compatibility check..."
     
-    for dep in "${deps[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            missing+=("$dep")
-        fi
-    done
-    
-    if [ ${#missing[@]} -ne 0 ]; then
-        echo -e "❌ ${RED}Missing: ${missing[*]}${NC}"
-        echo -e "💡 ${YELLOW}Run: nix-env -iA nixpkgs.qemu${NC}"
+    # Check QEMU availability
+    if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
+        log_error "QEMU system not found"
+        log_info "Install with: sudo apt install qemu-system-x86 || nix-env -iA nixpkgs.qemu"
         return 1
     fi
-    echo -e "✅ ${GREEN}All dependencies found!${NC}"
+    
+    # Check disk space
+    local available_space=$(df "${VM_DIR}" | awk 'NR==2 {print $4}')
+    if [ "${available_space}" -lt 1048576 ]; then
+        log_warning "Low disk space available"
+    fi
+    
+    log_success "System check completed"
     return 0
 }
 
-# 🆕 Create New VM - FIXED VERSION
-create_vm() {
-    echo -e "🆕 ${BLUE}Creating New VM...${NC}"
-    echo -e "${CYAN}─────────────────────────────────────${NC}"
-    
-    read -p "🎯 VM name: " vm_name
-    read -p "💾 RAM (MB) [2048]: " ram
-    ram=${ram:-2048}
-    read -p "💿 Disk size (GB) [20]: " disk
-    disk=${disk:-20}
-    read -p "⚡ CPUs [2]: " cpus
-    cpus=${cpus:-2}
-    read -p "🔗 SSH Port [2222]: " ssh_port
-    ssh_port=${ssh_port:-2222}
-    
-    # 🗂️ Create files
-    config_file="$VM_DIR/$vm_name.conf"
-    disk_file="$VM_DIR/$vm_name.qcow2"
-    
-    # 💾 Save config
-    cat > "$config_file" << EOF
-VM_NAME="$vm_name"
-RAM="$ram"
-DISK="$disk"
-CPUS="$cpus"
-SSH_PORT="$ssh_port"
-CREATED="$(date)"
-EOF
-
-    # 🛠️ Create disk - FIXED: Use proper format
-    echo -e "💿 ${YELLOW}Creating disk image...${NC}"
-    
-    # Remove existing file if any
-    rm -f "$disk_file"
-    
-    # Create disk with proper size format
-    if ! qemu-img create -f qcow2 "$disk_file" "${disk}G" 2>/dev/null; then
-        echo -e "❌ ${RED}Failed to create disk with ${disk}G${NC}"
-        echo -e "💡 ${YELLOW}Trying alternative size...${NC}"
-        # Try smaller size
-        qemu-img create -f qcow2 "$disk_file" "20G"
-        disk="20"
-        # Update config
-        sed -i "s/DISK=\"$disk\"/DISK=\"20\"/" "$config_file"
-    fi
-    
-    echo -e "✅ ${GREEN}VM '$vm_name' created successfully!${NC}"
-    echo -e "📊 ${CYAN}Specs: ${ram}MB RAM • ${cpus} CPU • ${disk}GB Disk${NC}"
-    echo -e "🔗 ${CYAN}SSH Port: $ssh_port${NC}"
+# Display header
+show_header() {
+    clear
+    echo -e "${PURPLE}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║           ZynexCloud VM Manager       ║"
+    echo "║             Professional v3.0         ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo -e "${CYAN}🚀 Secure • 🛡️ Reliable • 💼 Enterprise Ready${NC}"
+    echo
 }
 
-# 📋 List VMs with Status
-list_vms() {
-    local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
+# OS Selection Menu
+select_os() {
+    echo -e "${CYAN}🏢 Available Operating Systems:${NC}"
+    echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
     
-    if [ ${#vms[@]} -eq 0 ]; then
-        echo -e "📭 ${YELLOW}No VMs found. Create one first!${NC}"
-        return
-    fi
-    
-    echo -e "📂 ${GREEN}Your Virtual Machines:${NC}"
-    echo -e "${CYAN}┌─────────────────────────────────────┐${NC}"
-    for i in "${!vms[@]}"; do
-        local vm="${vms[$i]}"
-        local status="🔴 Stopped"
-        if pgrep -f "qemu.*$vm" >/dev/null; then
-            status="🟢 Running"
-        fi
-        printf "│ %2d) %-20s %s │\n" $((i+1)) "$vm" "$status"
+    local i=1
+    for os_key in "${!OS_OPTIONS[@]}"; do
+        IFS='|' read -r os_name os_url os_user os_pass <<< "${OS_OPTIONS[$os_key]}"
+        printf "${CYAN}│${NC} %2d. %-30s ${CYAN}│${NC}\n" "${i}" "${os_name}"
+        ((i++))
     done
-    echo -e "${CYAN}└─────────────────────────────────────┘${NC}"
+    
+    echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+    echo
+    
+    while true; do
+        read -p "Select OS (1-$((i-1))): " os_choice
+        if [[ "${os_choice}" =~ ^[0-9]+$ ]] && [ "${os_choice}" -ge 1 ] && [ "${os_choice}" -le $((i-1)) ]; then
+            local selected_os=$(echo "${!OS_OPTIONS[@]}" | cut -d' ' -f"${os_choice}")
+            IFS='|' read -r os_name os_url os_user os_pass <<< "${OS_OPTIONS[$selected_os]}"
+            
+            VM_OS_NAME="${os_name}"
+            VM_OS_URL="${os_url}"
+            VM_OS_USER="${os_user}"
+            VM_OS_PASS="${os_pass}"
+            VM_OS_KEY="${selected_os}"
+            
+            log_success "Selected: ${VM_OS_NAME}"
+            return 0
+        else
+            log_error "Invalid selection"
+        fi
+    done
 }
 
-# 🚀 Start VM
-start_vm() {
-    local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
+# Download OS image if needed
+download_os_image() {
+    local os_key="$1"
+    local image_file="${OS_IMAGES_DIR}/${os_key}.qcow2"
+    
+    if [ -f "${image_file}" ]; then
+        log_info "OS image already exists: ${os_key}"
+        echo "${image_file}"
+        return 0
+    fi
+    
+    IFS='|' read -r os_name os_url os_user os_pass <<< "${OS_OPTIONS[$os_key]}"
+    
+    log_info "Downloading ${os_name}..."
+    log_info "URL: ${os_url}"
+    
+    if wget --progress=bar:force -O "${image_file}.tmp" "${os_url}"; then
+        mv "${image_file}.tmp" "${image_file}"
+        log_success "Download completed: ${os_name}"
+        echo "${image_file}"
+        return 0
+    else
+        log_error "Failed to download OS image"
+        rm -f "${image_file}.tmp"
+        return 1
+    fi
+}
+
+# VM configuration management
+save_vm_config() {
+    local vm_name="$1"
+    local config_file="${VM_DIR}/${vm_name}/config.conf"
+    
+    cat > "${config_file}" << EOF
+# ZynexCloud VM Configuration
+VM_NAME="${vm_name}"
+VM_OS_NAME="${VM_OS_NAME}"
+VM_OS_KEY="${VM_OS_KEY}"
+VM_RAM="${vm_ram}"
+VM_DISK="${vm_disk}"
+VM_CPUS="${vm_cpus}"
+VM_SSH_PORT="${vm_ssh_port}"
+VM_USER="${vm_user}"
+CREATED_TIMESTAMP="$(date +%Y-%m-%d\ %H:%M:%S)"
+STATUS="STOPPED"
+EOF
+    
+    log_success "Configuration saved"
+}
+
+load_vm_config() {
+    local vm_name="$1"
+    local config_file="${VM_DIR}/${vm_name}/config.conf"
+    
+    if [ ! -f "${config_file}" ]; then
+        log_error "Configuration not found: ${vm_name}"
+        return 1
+    fi
+    
+    source "${config_file}"
+    return 0
+}
+
+# Create new VM
+create_vm() {
+    show_header
+    log_info "Virtual Machine Creation Wizard"
+    echo
+    
+    # OS Selection
+    if ! select_os; then
+        return 1
+    fi
+    echo
+    
+    # VM Name
+    while true; do
+        read -p "Enter VM name: " vm_name
+        vm_name=$(echo "${vm_name}" | tr -cd '[:alnum:]-_')
+        
+        if [ -z "${vm_name}" ]; then
+            log_error "VM name cannot be empty"
+            continue
+        fi
+        
+        if [ -d "${VM_DIR}/${vm_name}" ]; then
+            log_error "VM '${vm_name}' already exists"
+            continue
+        fi
+        
+        break
+    done
+    
+    # Create VM directory
+    mkdir -p "${VM_DIR}/${vm_name}"
+    
+    # Get VM specifications
+    read -p "Memory (MB) [2048]: " vm_ram
+    vm_ram=${vm_ram:-2048}
+    
+    read -p "Disk size (GB) [20]: " vm_disk
+    vm_disk=${vm_disk:-20}
+    
+    read -p "CPU cores [2]: " vm_cpus
+    vm_cpus=${vm_cpus:-2}
+    
+    read -p "SSH port [2222]: " vm_ssh_port
+    vm_ssh_port=${vm_ssh_port:-2222}
+    
+    read -p "Username [${VM_OS_USER}]: " vm_user
+    vm_user=${vm_user:-${VM_OS_USER}}
+    
+    # Validate port availability
+    if netstat -tuln 2>/dev/null | grep -q ":${vm_ssh_port} "; then
+        log_error "Port ${vm_ssh_port} is already in use"
+        return 1
+    fi
+    
+    # Download OS image
+    log_info "Preparing OS image..."
+    local base_image=$(download_os_image "${VM_OS_KEY}")
+    if [ $? -ne 0 ]; then
+        log_error "Failed to prepare OS image"
+        return 1
+    fi
+    
+    # Create disk image
+    log_info "Creating disk image (${vm_disk}GB)..."
+    local disk_file="${VM_DIR}/${vm_name}/disk.qcow2"
+    
+    if ! qemu-img create -f qcow2 -b "${base_image}" -F qcow2 "${disk_file}" "${vm_disk}G" 2>/dev/null; then
+        log_error "Failed to create disk image"
+        return 1
+    fi
+    
+    # Save configuration
+    save_vm_config "${vm_name}"
+    
+    # Summary
+    echo
+    log_success "Virtual Machine '${vm_name}' created successfully"
+    echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}│${NC} ${BOLD}VM Creation Summary${NC}                     ${CYAN}│${NC}"
+    echo -e "${CYAN}├──────────────────────────────────────────┤${NC}"
+    echo -e "${CYAN}│${NC} 🖥️  OS: ${VM_OS_NAME}                  ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 💾 Memory: ${vm_ram}MB                          ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 💿 Storage: ${vm_disk}GB                         ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} ⚡ CPU Cores: ${vm_cpus}                          ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 🔗 SSH Port: ${vm_ssh_port}                       ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 👤 Username: ${vm_user}                      ${CYAN}│${NC}"
+    echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+}
+
+# List all VMs
+list_vms() {
+    show_header
+    log_info "Virtual Machine Inventory"
+    echo
+    
+    local vms=($(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
     
     if [ ${#vms[@]} -eq 0 ]; then
-        echo -e "❌ ${RED}No VMs found${NC}"
+        log_warning "No virtual machines found"
         return
     fi
     
-    list_vms
-    read -p "🎯 Select VM to start: " choice
+    echo -e "${CYAN}┌─────────────────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}│${NC} ${BOLD}VM Name${NC}             ${BOLD}Status${NC}    ${BOLD}OS${NC}           ${BOLD}Resources${NC}   ${CYAN}│${NC}"
+    echo -e "${CYAN}├─────────────────────────────────────────────────────┤${NC}"
     
-    if [[ ! "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#vms[@]} ]; then
-        echo -e "❌ ${RED}Invalid selection${NC}"
+    for vm in "${vms[@]}"; do
+        if load_vm_config "${vm}"; then
+            local status_icon="🔴"
+            local status_text="STOPPED"
+            
+            if pgrep -f "qemu.*${vm}" >/dev/null; then
+                status_icon="🟢"
+                status_text="RUNNING"
+            fi
+            
+            echo -e "${CYAN}│${NC} %-18s ${status_icon} %-6s %-12s %-10s ${CYAN}│${NC}" \
+                "${vm}" "${status_text}" "${VM_OS_NAME:0:12}" "${VM_CPUS}C/${VM_RAM}MB"
+        fi
+    done
+    
+    echo -e "${CYAN}└─────────────────────────────────────────────────────┘${NC}"
+    echo
+    log_info "Total: ${#vms[@]} virtual machine(s)"
+}
+
+# Start VM
+start_vm() {
+    show_header
+    
+    local vms=($(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
+    
+    if [ ${#vms[@]} -eq 0 ]; then
+        log_error "No virtual machines available"
         return
     fi
     
-    vm_name="${vms[$((choice-1))]}"
-    config_file="$VM_DIR/$vm_name.conf"
-    disk_file="$VM_DIR/$vm_name.qcow2"
+    log_info "Available Virtual Machines:"
+    for i in "${!vms[@]}"; do
+        local status="(stopped)"
+        if pgrep -f "qemu.*${vms[i]}" >/dev/null; then
+            status="(running)"
+        fi
+        echo "  $((i+1)). ${vms[i]} ${status}"
+    done
+    echo
     
-    if [[ ! -f "$config_file" ]]; then
-        echo -e "❌ ${RED}Config file not found: $config_file${NC}"
+    read -p "Select VM to start: " selection
+    
+    local vm_name="${vms[$((selection-1))]}"
+    
+    if ! load_vm_config "${vm_name}"; then
         return
     fi
     
-    source "$config_file"
+    local disk_file="${VM_DIR}/${vm_name}/disk.qcow2"
     
-    echo -e "🚀 ${GREEN}Starting $VM_NAME...${NC}"
-    echo -e "⚡ ${CYAN}Specs: ${RAM}MB RAM • ${CPUS} CPUs • ${DISK}GB Disk${NC}"
-    
-    # Check if disk exists
-    if [[ ! -f "$disk_file" ]]; then
-        echo -e "❌ ${RED}Disk file not found: $disk_file${NC}"
-        echo -e "💡 ${YELLOW}Creating new disk...${NC}"
-        qemu-img create -f qcow2 "$disk_file" "20G"
+    # Check if VM is already running
+    if pgrep -f "qemu.*${vm_name}" >/dev/null; then
+        log_warning "VM '${vm_name}' is already running"
+        return
     fi
     
-    # 🖥️ Start QEMU
+    log_info "Starting virtual machine: ${vm_name}"
+    
+    # Start QEMU instance
     qemu-system-x86_64 \
         -enable-kvm \
-        -m "$RAM" \
-        -smp "$CPUS" \
-        -hda "$disk_file" \
-        -netdev user,id=net0,hostfwd=tcp::${SSH_PORT}-:22 \
-        -device virtio-net-pci,netdev=net0 \
+        -name "${vm_name}" \
+        -m "${VM_RAM}" \
+        -smp "${VM_CPUS}" \
+        -drive "file=${disk_file},format=qcow2,if=virtio" \
+        -netdev "user,id=net0,hostfwd=tcp::${VM_SSH_PORT}-:22" \
+        -device "virtio-net-pci,netdev=net0" \
         -boot c \
+        -nographic \
         -daemonize
     
-    echo -e "✅ ${GREEN}VM started in background!${NC}"
-    echo -e "🔗 ${CYAN}SSH: ssh -p $SSH_PORT user@localhost${NC}"
-    echo -e "💡 ${YELLOW}Note: Install OS first using ISO${NC}"
+    log_success "VM '${vm_name}' started successfully"
+    echo
+    echo -e "${CYAN}🔗 Connection Details:${NC}"
+    echo "  SSH: ssh -p ${VM_SSH_PORT} ${VM_USER}@localhost"
+    echo "  OS: ${VM_OS_NAME}"
+    echo "  Status: 🟢 Running in background"
 }
 
-# ⚡ 24/7 Keep-Alive System
-start_24x7() {
-    echo -e "🛡️ ${BLUE}Starting 24/7 Anti-Suspend System...${NC}"
+# Stop VM
+stop_vm() {
+    show_header
     
-    # 🔄 Create keep-alive script
-    cat > "$VM_DIR/keepalive.sh" << 'EOF'
+    local vms=($(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
+    
+    if [ ${#vms[@]} -eq 0 ]; then
+        log_error "No virtual machines available"
+        return
+    fi
+    
+    log_info "Available Virtual Machines:"
+    for i in "${!vms[@]}"; do
+        local status="🔴 stopped"
+        if pgrep -f "qemu.*${vms[i]}" >/dev/null; then
+            status="🟢 running"
+        fi
+        echo "  $((i+1)). ${vms[i]} ${status}"
+    done
+    echo
+    
+    read -p "Select VM to stop: " selection
+    
+    local vm_name="${vms[$((selection-1))]}"
+    
+    log_info "Stopping virtual machine: ${vm_name}"
+    
+    # Find and terminate QEMU process
+    local pids=$(pgrep -f "qemu.*${vm_name}" 2>/dev/null || true)
+    
+    if [ -z "${pids}" ]; then
+        log_warning "VM '${vm_name}' is not running"
+        return
+    fi
+    
+    # Send termination signal
+    kill ${pids} 2>/dev/null && sleep 2
+    
+    # Force kill if still running
+    if pgrep -f "qemu.*${vm_name}" >/dev/null; then
+        log_warning "Force terminating VM process"
+        kill -9 ${pids} 2>/dev/null
+    fi
+    
+    log_success "VM '${vm_name}' stopped successfully"
+}
+
+# Delete VM
+delete_vm() {
+    show_header
+    
+    local vms=($(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
+    
+    if [ ${#vms[@]} -eq 0 ]; then
+        log_error "No virtual machines available"
+        return
+    fi
+    
+    log_info "Available Virtual Machines:"
+    for i in "${!vms[@]}"; do
+        echo "  $((i+1)). ${vms[i]}"
+    done
+    echo
+    
+    read -p "Select VM to delete: " selection
+    
+    local vm_name="${vms[$((selection-1))]}"
+    
+    # Confirm deletion
+    echo
+    log_warning "⚠️  WARNING: This will permanently delete VM '${vm_name}' and all its data"
+    read -p "Type 'CONFIRM' to proceed: " confirmation
+    
+    if [ "${confirmation}" != "CONFIRM" ]; then
+        log_info "Deletion cancelled"
+        return
+    fi
+    
+    # Stop VM if running
+    local pids=$(pgrep -f "qemu.*${vm_name}" 2>/dev/null || true)
+    if [ -n "${pids}" ]; then
+        log_info "Stopping running VM instance"
+        kill ${pids} 2>/dev/null
+        sleep 2
+    fi
+    
+    # Remove VM directory
+    if rm -rf "${VM_DIR}/${vm_name}"; then
+        log_success "VM '${vm_name}' deleted successfully"
+    else
+        log_error "Failed to delete VM '${vm_name}'"
+    fi
+}
+
+# System information
+show_system_info() {
+    show_header
+    log_info "System Overview"
+    echo
+    
+    # VM statistics
+    local total_vms=$(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d | wc -l)
+    local running_vms=$(pgrep -f "qemu-system" | wc -l)
+    
+    # Disk usage
+    local disk_usage=$(du -sh "${VM_DIR}" 2>/dev/null | cut -f1)
+    
+    echo -e "${CYAN}📊 Virtualization Environment:${NC}"
+    echo "  🖥️  Total VMs: ${total_vms}"
+    echo "  🟢 Running VMs: ${running_vms}"
+    echo "  💾 Storage Usage: ${disk_usage:-0B}"
+    echo "  📁 VM Directory: ${VM_DIR}"
+    echo
+    
+    # System resources
+    echo -e "${CYAN}⚡ System Resources:${NC}"
+    echo "  💾 Memory: $(free -h | awk '/^Mem:/ {print $3 "/" $2}')"
+    echo "  📈 Load: $(uptime | awk -F'load average:' '{print $2}')"
+    echo "  ⏰ Uptime: $(uptime -p)"
+}
+
+# 24/7 Monitoring Service
+start_monitoring() {
+    show_header
+    log_info "Initializing 24/7 Monitoring Service"
+    
+    # Create monitoring script
+    local monitor_script="${CONFIG_DIR}/monitor.sh"
+    
+    cat > "${monitor_script}" << 'EOF'
 #!/bin/bash
-# 🛡️ ZynexCloud 24/7 Protection
-echo "🛡️ Starting 24/7 protection..."
+# ZynexCloud VM Monitoring Service
+
+MONITOR_LOG="/tmp/zynexcloud-monitor.log"
+
+echo "$(date): 🛡️ Monitoring service started" >> "${MONITOR_LOG}"
 
 while true; do
-    # ❤️ Heartbeat
-    echo "$(date): ❤️ ZynexCloud VM Active" >> /tmp/zynex-heartbeat.log
-    touch /tmp/zynex-alive
+    # Log system status
+    echo "$(date): ❤️ System active - VMs running: $(pgrep -f 'qemu-system' | wc -l)" >> "${MONITOR_LOG}"
     
-    # 🔄 Activity simulation
-    dd if=/dev/urandom of=/dev/null bs=1K count=1 2>/dev/null
-    sync
+    # Maintain system activity
+    touch /tmp/.zynexcloud_heartbeat
     
-    sleep 30
+    # Cleanup old logs
+    tail -n 1000 "${MONITOR_LOG}" > "${MONITOR_LOG}.tmp" && mv "${MONITOR_LOG}.tmp" "${MONITOR_LOG}"
+    
+    sleep 60
 done
 EOF
 
-    chmod +x "$VM_DIR/keepalive.sh"
+    chmod +x "${monitor_script}"
     
-    # 🚀 Start in background
-    nohup "$VM_DIR/keepalive.sh" >/dev/null 2>&1 &
+    # Start monitoring service
+    nohup "${monitor_script}" >/dev/null 2>&1 &
     
-    echo -e "✅ ${GREEN}24/7 protection activated!${NC}"
-    echo -e "💤 ${CYAN}Your VM will never sleep!${NC}"
+    log_success "24/7 monitoring service activated"
+    log_info "Service PID: $!"
+    log_info "Log file: /tmp/zynexcloud-monitor.log"
 }
 
-# 📊 VM Info
-vm_info() {
-    local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
+# VM Details
+show_vm_details() {
+    show_header
+    
+    local vms=($(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
     
     if [ ${#vms[@]} -eq 0 ]; then
-        echo -e "❌ ${RED}No VMs found${NC}"
+        log_error "No virtual machines available"
         return
     fi
     
-    list_vms
-    read -p "🎯 Select VM for info: " choice
-    
-    vm_name="${vms[$((choice-1))]}"
-    config_file="$VM_DIR/$vm_name.conf"
-    
-    if [[ ! -f "$config_file" ]]; then
-        echo -e "❌ ${RED}Config file not found${NC}"
-        return
-    fi
-    
-    source "$config_file"
-    
-    echo -e "${PURPLE}"
-    echo "╔════════════════════════════════════════╗"
-    echo "║             📊 VM DETAILS             ║"
-    echo "╚════════════════════════════════════════╝"
-    echo -e "${NC}"
-    echo -e "🎯 ${CYAN}Name:${NC} $VM_NAME"
-    echo -e "💾 ${CYAN}RAM:${NC} ${RAM}MB"
-    echo -e "⚡ ${CYAN}CPUs:${NC} $CPUS"
-    echo -e "💿 ${CYAN}Disk:${NC} ${DISK}GB"
-    echo -e "🔗 ${CYAN}SSH Port:${NC} $SSH_PORT"
-    echo -e "📅 ${CYAN}Created:${NC} $CREATED"
-    
-    # 🟢 Status check
-    if pgrep -f "qemu.*$vm_name" >/dev/null; then
-        echo -e "🟢 ${GREEN}Status: RUNNING${NC}"
-    else
-        echo -e "🔴 ${RED}Status: STOPPED${NC}"
-    fi
+    log_info "Available Virtual Machines:"
+    for i in "${!vms[@]}"; do
+        echo "  $((i+1)). ${vms[i]}"
+    done
     echo
-}
-
-# 🗑️ Delete VM
-delete_vm() {
-    local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
     
-    if [ ${#vms[@]} -eq 0 ]; then
-        echo -e "❌ ${RED}No VMs found${NC}"
+    read -p "Select VM for details: " selection
+    
+    local vm_name="${vms[$((selection-1))]}"
+    
+    if ! load_vm_config "${vm_name}"; then
         return
     fi
     
-    list_vms
-    read -p "🎯 Select VM to delete: " choice
-    
-    vm_name="${vms[$((choice-1))]}"
-    
-    echo -e "⚠️ ${YELLOW}This will PERMANENTLY delete '$vm_name'!${NC}"
-    read -p "❓ Are you sure? (y/N): " confirm
-    
-    if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
-        # 🔴 Stop if running
-        if pgrep -f "qemu.*$vm_name" >/dev/null; then
-            pkill -f "qemu.*$vm_name"
-            echo -e "🔴 ${YELLOW}VM stopped${NC}"
-        fi
-        
-        # 🗑️ Delete files
-        rm -f "$VM_DIR/$vm_name.conf" "$VM_DIR/$vm_name.qcow2"
-        echo -e "✅ ${GREEN}VM '$vm_name' deleted!${NC}"
-    else
-        echo -e "🔵 ${BLUE}Deletion cancelled${NC}"
-    fi
-}
-
-# 📈 System Status
-system_status() {
-    echo -e "${PURPLE}"
-    echo "╔════════════════════════════════════════╗"
-    echo "║             📊 SYSTEM STATUS          ║"
-    echo "╚════════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    # 🖥️ VM Count
-    local vm_count=$(find "$VM_DIR" -name "*.conf" | wc -l)
-    echo -e "🖥️ ${CYAN}Total VMs:${NC} $vm_count"
-    
-    # 🔄 24/7 Status
-    if pgrep -f "keepalive.sh" >/dev/null; then
-        echo -e "🛡️ ${GREEN}24/7 Protection: ACTIVE${NC}"
-    else
-        echo -e "🔴 ${RED}24/7 Protection: INACTIVE${NC}"
-    fi
-    
-    # 💾 Disk Usage
-    echo -e "💾 ${CYAN}VM Directory:${NC} $VM_DIR"
-    if [ -d "$VM_DIR" ]; then
-        echo -e "📦 ${CYAN}Disk Usage:${NC} $(du -sh "$VM_DIR" 2>/dev/null | cut -f1 || echo "0K")"
-    else
-        echo -e "📦 ${CYAN}Disk Usage:${NC} 0K"
-    fi
-    
-    # 🚀 Running VMs
-    local running_vms=$(pgrep -f "qemu-system" | wc -l)
-    echo -e "🚀 ${CYAN}Running VMs:${NC} $running_vms"
     echo
+    echo -e "${CYAN}📋 VM Details: ${vm_name}${NC}"
+    echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}│${NC} 🖥️  OS: ${VM_OS_NAME}                     ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 💾 Memory: ${VM_RAM}MB                           ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 💿 Storage: ${VM_DISK}GB                          ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} ⚡ CPU Cores: ${VM_CPUS}                           ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 🔗 SSH Port: ${VM_SSH_PORT}                        ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 👤 Username: ${VM_USER}                         ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 📅 Created: ${CREATED_TIMESTAMP}        ${CYAN}│${NC}"
+    
+    if pgrep -f "qemu.*${vm_name}" >/dev/null; then
+        echo -e "${CYAN}│${NC} 🟢 Status: RUNNING                            ${CYAN}│${NC}"
+    else
+        echo -e "${CYAN}│${NC} 🔴 Status: STOPPED                            ${CYAN}│${NC}"
+    fi
+    echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 }
 
-# 🎮 Main Menu
-main_menu() {
+# Main menu
+show_main_menu() {
     while true; do
-        display_header
-        system_status
+        show_header
         
-        echo -e "${GREEN}🎮 MAIN MENU:${NC}"
-        echo -e "1) 🆕 Create VM"
-        echo -e "2) 🚀 Start VM" 
-        echo -e "3) 📋 List VMs"
-        echo -e "4) 📊 VM Info"
-        echo -e "5) 🗑️ Delete VM"
-        echo -e "6) 🛡️  Start 24/7 Protection"
-        echo -e "7) 📈 System Status"
-        echo -e "0) ❌ Exit"
+        # Quick status
+        local total_vms=$(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d | wc -l)
+        local running_vms=$(pgrep -f "qemu-system" | wc -l)
+        
+        echo -e "${CYAN}📊 System Status: ${total_vms} VMs total, ${running_vms} running${NC}"
         echo
         
-        read -p "🎯 Choose option: " option
+        echo -e "${BOLD}🎯 Management Options:${NC}"
+        echo "  1. 🆕 Create Virtual Machine"
+        echo "  2. 📋 List Virtual Machines" 
+        echo "  3. 🚀 Start Virtual Machine"
+        echo "  4. ⏹️  Stop Virtual Machine"
+        echo "  5. 🗑️  Delete Virtual Machine"
+        echo "  6. 📊 VM Details"
+        echo "  7. ℹ️  System Information"
+        echo "  8. 🛡️  Start 24/7 Monitoring"
+        echo "  0. ❌ Exit"
+        echo
         
-        case $option in
+        read -p "Enter your choice: " choice
+        
+        case "${choice}" in
             1) create_vm ;;
-            2) start_vm ;;
-            3) list_vms ;;
-            4) vm_info ;;
+            2) list_vms ;;
+            3) start_vm ;;
+            4) stop_vm ;;
             5) delete_vm ;;
-            6) start_24x7 ;;
-            7) system_status ;;
+            6) show_vm_details ;;
+            7) show_system_info ;;
+            8) start_monitoring ;;
             0) 
-                echo -e "👋 ${GREEN}Thank you for using ZynexCloud!${NC}"
-                echo -e "🚀 ${CYAN}Visit: https://zynexcloud.com${NC}"
-                exit 0
+                log_info "Thank you for using ZynexCloud VM Manager"
+                exit 0 
                 ;;
-            *)
-                echo -e "❌ ${RED}Invalid option!${NC}"
+            *) 
+                log_error "Invalid option selected"
                 ;;
         esac
         
         echo
-        read -p "⏎ Press Enter to continue..."
+        read -p "Press Enter to continue..."
     done
 }
 
-# 🚀 Script Start
-echo -e "${PURPLE}"
-echo "╔════════════════════════════════════════╗"
-echo "║          🚀 INITIALIZING...           ║"
-echo "║        ZynexCloud VM Manager          ║"
-echo "╚════════════════════════════════════════╝"
-echo -e "${NC}"
+# Initialize and start
+main() {
+    log_info "Initializing ZynexCloud VM Management System"
+    
+    if ! check_system; then
+        log_error "System compatibility check failed"
+        exit 1
+    fi
+    
+    show_main_menu
+}
 
-# Check deps (but don't exit if missing in IDX)
-if ! check_deps; then
-    echo -e "⚠️ ${YELLOW}Running in limited mode${NC}"
-fi
-
-main_menu
+# Start application
+main "$@"
