@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# 🚀 ZynexCloud VM Manager
-# 24/7 • Anti-Suspend • Premium Edition
+# 🚀 ZynexCloud VM Manager - FIXED VERSION
+# Disk size issue resolved
 
 set -e
 
@@ -46,35 +46,14 @@ check_deps() {
     
     if [ ${#missing[@]} -ne 0 ]; then
         echo -e "❌ ${RED}Missing: ${missing[*]}${NC}"
-        echo -e "💡 ${YELLOW}Run: sudo apt install qemu-system${NC}"
-        exit 1
+        echo -e "💡 ${YELLOW}Run: nix-env -iA nixpkgs.qemu${NC}"
+        return 1
     fi
     echo -e "✅ ${GREEN}All dependencies found!${NC}"
+    return 0
 }
 
-# 📋 List VMs with Status
-list_vms() {
-    local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
-    
-    if [ ${#vms[@]} -eq 0 ]; then
-        echo -e "📭 ${YELLOW}No VMs found. Create one first!${NC}"
-        return
-    fi
-    
-    echo -e "📂 ${GREEN}Your Virtual Machines:${NC}"
-    echo -e "${CYAN}┌─────────────────────────────────────┐${NC}"
-    for i in "${!vms[@]}"; do
-        local vm="${vms[$i]}"
-        local status="🟢 Running"
-        if ! pgrep -f "qemu.*$vm" >/dev/null; then
-            status="🔴 Stopped"
-        fi
-        printf "│ %2d) %-20s %s │\n" $((i+1)) "$vm" "$status"
-    done
-    echo -e "${CYAN}└─────────────────────────────────────┘${NC}"
-}
-
-# 🆕 Create New VM
+# 🆕 Create New VM - FIXED VERSION
 create_vm() {
     echo -e "🆕 ${BLUE}Creating New VM...${NC}"
     echo -e "${CYAN}─────────────────────────────────────${NC}"
@@ -97,18 +76,54 @@ create_vm() {
     cat > "$config_file" << EOF
 VM_NAME="$vm_name"
 RAM="$ram"
-DISK="${disk}G"
+DISK="$disk"
 CPUS="$cpus"
 SSH_PORT="$ssh_port"
 CREATED="$(date)"
 EOF
 
-    # 🛠️ Create disk
+    # 🛠️ Create disk - FIXED: Use proper format
     echo -e "💿 ${YELLOW}Creating disk image...${NC}"
-    qemu-img create -f qcow2 "$disk_file" "${disk}G"
+    
+    # Remove existing file if any
+    rm -f "$disk_file"
+    
+    # Create disk with proper size format
+    if ! qemu-img create -f qcow2 "$disk_file" "${disk}G" 2>/dev/null; then
+        echo -e "❌ ${RED}Failed to create disk with ${disk}G${NC}"
+        echo -e "💡 ${YELLOW}Trying alternative size...${NC}"
+        # Try smaller size
+        qemu-img create -f qcow2 "$disk_file" "20G"
+        disk="20"
+        # Update config
+        sed -i "s/DISK=\"$disk\"/DISK=\"20\"/" "$config_file"
+    fi
     
     echo -e "✅ ${GREEN}VM '$vm_name' created successfully!${NC}"
     echo -e "📊 ${CYAN}Specs: ${ram}MB RAM • ${cpus} CPU • ${disk}GB Disk${NC}"
+    echo -e "🔗 ${CYAN}SSH Port: $ssh_port${NC}"
+}
+
+# 📋 List VMs with Status
+list_vms() {
+    local vms=($(find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
+    
+    if [ ${#vms[@]} -eq 0 ]; then
+        echo -e "📭 ${YELLOW}No VMs found. Create one first!${NC}"
+        return
+    fi
+    
+    echo -e "📂 ${GREEN}Your Virtual Machines:${NC}"
+    echo -e "${CYAN}┌─────────────────────────────────────┐${NC}"
+    for i in "${!vms[@]}"; do
+        local vm="${vms[$i]}"
+        local status="🔴 Stopped"
+        if pgrep -f "qemu.*$vm" >/dev/null; then
+            status="🟢 Running"
+        fi
+        printf "│ %2d) %-20s %s │\n" $((i+1)) "$vm" "$status"
+    done
+    echo -e "${CYAN}└─────────────────────────────────────┘${NC}"
 }
 
 # 🚀 Start VM
@@ -132,10 +147,22 @@ start_vm() {
     config_file="$VM_DIR/$vm_name.conf"
     disk_file="$VM_DIR/$vm_name.qcow2"
     
+    if [[ ! -f "$config_file" ]]; then
+        echo -e "❌ ${RED}Config file not found: $config_file${NC}"
+        return
+    fi
+    
     source "$config_file"
     
     echo -e "🚀 ${GREEN}Starting $VM_NAME...${NC}"
-    echo -e "⚡ ${CYAN}Specs: ${RAM}MB RAM • ${CPUS} CPUs • ${DISK} Disk${NC}"
+    echo -e "⚡ ${CYAN}Specs: ${RAM}MB RAM • ${CPUS} CPUs • ${DISK}GB Disk${NC}"
+    
+    # Check if disk exists
+    if [[ ! -f "$disk_file" ]]; then
+        echo -e "❌ ${RED}Disk file not found: $disk_file${NC}"
+        echo -e "💡 ${YELLOW}Creating new disk...${NC}"
+        qemu-img create -f qcow2 "$disk_file" "20G"
+    fi
     
     # 🖥️ Start QEMU
     qemu-system-x86_64 \
@@ -150,7 +177,7 @@ start_vm() {
     
     echo -e "✅ ${GREEN}VM started in background!${NC}"
     echo -e "🔗 ${CYAN}SSH: ssh -p $SSH_PORT user@localhost${NC}"
-    echo -e "💡 ${YELLOW}Password: Try 'password' or check VM docs${NC}"
+    echo -e "💡 ${YELLOW}Note: Install OS first using ISO${NC}"
 }
 
 # ⚡ 24/7 Keep-Alive System
@@ -200,6 +227,11 @@ vm_info() {
     vm_name="${vms[$((choice-1))]}"
     config_file="$VM_DIR/$vm_name.conf"
     
+    if [[ ! -f "$config_file" ]]; then
+        echo -e "❌ ${RED}Config file not found${NC}"
+        return
+    fi
+    
     source "$config_file"
     
     echo -e "${PURPLE}"
@@ -210,7 +242,7 @@ vm_info() {
     echo -e "🎯 ${CYAN}Name:${NC} $VM_NAME"
     echo -e "💾 ${CYAN}RAM:${NC} ${RAM}MB"
     echo -e "⚡ ${CYAN}CPUs:${NC} $CPUS"
-    echo -e "💿 ${CYAN}Disk:${NC} $DISK"
+    echo -e "💿 ${CYAN}Disk:${NC} ${DISK}GB"
     echo -e "🔗 ${CYAN}SSH Port:${NC} $SSH_PORT"
     echo -e "📅 ${CYAN}Created:${NC} $CREATED"
     
@@ -276,7 +308,11 @@ system_status() {
     
     # 💾 Disk Usage
     echo -e "💾 ${CYAN}VM Directory:${NC} $VM_DIR"
-    echo -e "📦 ${CYAN}Disk Usage:${NC} $(du -sh "$VM_DIR" 2>/dev/null | cut -f1) || New"
+    if [ -d "$VM_DIR" ]; then
+        echo -e "📦 ${CYAN}Disk Usage:${NC} $(du -sh "$VM_DIR" 2>/dev/null | cut -f1 || echo "0K")"
+    else
+        echo -e "📦 ${CYAN}Disk Usage:${NC} 0K"
+    fi
     
     # 🚀 Running VMs
     local running_vms=$(pgrep -f "qemu-system" | wc -l)
@@ -334,5 +370,9 @@ echo "║        ZynexCloud VM Manager          ║"
 echo "╚════════════════════════════════════════╝"
 echo -e "${NC}"
 
-check_deps
+# Check deps (but don't exit if missing in IDX)
+if ! check_deps; then
+    echo -e "⚠️ ${YELLOW}Running in limited mode${NC}"
+fi
+
 main_menu
