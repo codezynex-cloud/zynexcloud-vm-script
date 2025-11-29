@@ -45,6 +45,36 @@ declare -A OS_OPTIONS=(
     ["rocky9"]="Rocky Linux 9|https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2|rocky|rocky"
 )
 
+# ISS Command - Main entry point
+iss() {
+    case "$1" in
+        create|start|stop|list|delete|status|info)
+            main "$@"
+            ;;
+        *)
+            echo -e "${GREEN}${BOLD}"
+            echo "╔════════════════════════════════════════╗"
+            echo "║           ZynexCloud VM Manager       ║"
+            echo "║             Professional v4.0         ║"
+            echo "╚════════════════════════════════════════╝"
+            echo -e "${NC}"
+            echo -e "${CYAN}Usage:${NC}"
+            echo "  iss create    - Create new VM"
+            echo "  iss start     - Start VM"
+            echo "  iss stop      - Stop VM" 
+            echo "  iss list      - List all VMs"
+            echo "  iss delete    - Delete VM"
+            echo "  iss status    - Show VM status"
+            echo "  iss info      - System information"
+            echo ""
+            echo -e "${YELLOW}Examples:${NC}"
+            echo "  iss create    # Interactive VM creation"
+            echo "  iss start     # Start a VM"
+            echo "  iss list      # List all virtual machines"
+            ;;
+    esac
+}
+
 # System checks
 check_system() {
     log_info "Performing system compatibility check..."
@@ -350,7 +380,7 @@ create_vm() {
     
     echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
     echo
-    log_info "Use 'Start VM' option to launch your virtual machine"
+    log_info "Use 'iss start' to launch your virtual machine"
 }
 
 # Create cloud-init configuration
@@ -704,110 +734,104 @@ show_system_info() {
     echo "  ⏰ Uptime: $(uptime -p)"
 }
 
-# 24/7 Monitoring Service
-start_monitoring() {
-    show_header
-    log_info "Initializing 24/7 Monitoring Service"
+# Main function with command handling
+main() {
+    local command="$1"
     
-    # Kill existing monitoring
-    pkill -f "zynexcloud-monitor" 2>/dev/null || true
-    
-    # Create monitoring script
-    local monitor_script="${CONFIG_DIR}/zynexcloud-monitor.sh"
-    
-    cat > "${monitor_script}" << 'EOF'
-#!/bin/bash
-# ZynexCloud VM Monitoring Service
-
-MONITOR_LOG="/tmp/zynexcloud-monitor.log"
-
-echo "$(date): 🛡️ ZynexCloud Monitoring started" >> "${MONITOR_LOG}"
-
-while true; do
-    # Log system status
-    echo "$(date): ❤️ System active - VMs running: $(pgrep -f 'qemu-system' | wc -l)" >> "${MONITOR_LOG}"
-    
-    # Maintain system activity
-    touch /tmp/.zynexcloud_heartbeat
-    
-    # Cleanup old logs
-    tail -n 1000 "${MONITOR_LOG}" > "${MONITOR_LOG}.tmp" && mv "${MONITOR_LOG}.tmp" "${MONITOR_LOG}"
-    
-    sleep 60
-done
-EOF
-
-    chmod +x "${monitor_script}"
-    
-    # Start monitoring service
-    nohup "${monitor_script}" >/dev/null 2>&1 &
-    
-    log_success "24/7 monitoring service activated"
-    log_info "Service PID: $!"
-    log_info "Log file: /tmp/zynexcloud-monitor.log"
-}
-
-# Main menu
-show_main_menu() {
-    while true; do
-        show_header
-        
-        # Quick status
-        local total_vms=$(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d | wc -l)
-        local running_vms=$(pgrep -f "qemu-system" | wc -l)
-        
-        echo -e "${CYAN}📊 System Status: ${total_vms} VMs total, ${running_vms} running${NC}"
-        echo
-        
-        echo -e "${BOLD}🎯 Management Options:${NC}"
-        echo "  1. 🆕 Create Virtual Machine"
-        echo "  2. 📋 List Virtual Machines" 
-        echo "  3. 🚀 Start Virtual Machine"
-        echo "  4. ⏹️  Stop Virtual Machine"
-        echo "  5. 🗑️  Delete Virtual Machine"
-        echo "  6. 📊 VM Details"
-        echo "  7. ℹ️  System Information"
-        echo "  8. 🛡️  Start 24/7 Monitoring"
-        echo "  0. ❌ Exit"
-        echo
-        
-        read -p "Enter your choice: " choice
-        
-        case "${choice}" in
-            1) create_vm ;;
-            2) list_vms ;;
-            3) start_vm ;;
-            4) stop_vm ;;
-            5) delete_vm ;;
-            6) show_vm_details ;;
-            7) show_system_info ;;
-            8) start_monitoring ;;
-            0) 
-                log_info "Thank you for using ZynexCloud VM Manager"
-                echo -e "${GREEN}Visit: https://zynexcloud.com${NC}"
-                exit 0 
-                ;;
-            *) 
-                log_error "Invalid option selected"
-                ;;
-        esac
-        
-        echo
-        read -p "Press Enter to continue..."
-    done
+    case "$command" in
+        create)
+            create_vm
+            ;;
+        start)
+            start_vm
+            ;;
+        stop)
+            stop_vm
+            ;;
+        list)
+            list_vms
+            ;;
+        delete)
+            delete_vm
+            ;;
+        info)
+            show_system_info
+            ;;
+        status)
+            list_vms
+            ;;
+        *)
+            show_header
+            echo -e "${CYAN}Usage:${NC}"
+            echo "  iss create    - Create new VM"
+            echo "  iss start     - Start VM"
+            echo "  iss stop      - Stop VM" 
+            echo "  iss list      - List all VMs"
+            echo "  iss delete    - Delete VM"
+            echo "  iss status    - Show VM status"
+            echo "  iss info      - System information"
+            ;;
+    esac
 }
 
 # Initialize and start
-main() {
-    log_info "Initializing ZynexCloud VM Management System"
-    
-    if ! check_system; then
-        log_error "System compatibility check failed"
-        log_info "Running in limited mode - some features may not work"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    if [ $# -eq 0 ]; then
+        # No arguments - show full menu interface
+        log_info "Initializing ZynexCloud VM Management System"
+        
+        if ! check_system; then
+            log_error "System compatibility check failed"
+            log_info "Running in limited mode - some features may not work"
+        fi
+        
+        # Show main menu
+        while true; do
+            show_header
+            
+            # Quick status
+            local total_vms=$(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d | wc -l)
+            local running_vms=$(pgrep -f "qemu-system" | wc -l)
+            
+            echo -e "${CYAN}📊 System Status: ${total_vms} VMs total, ${running_vms} running${NC}"
+            echo
+            
+            echo -e "${BOLD}🎯 Management Options:${NC}"
+            echo "  1. 🆕 Create Virtual Machine"
+            echo "  2. 📋 List Virtual Machines" 
+            echo "  3. 🚀 Start Virtual Machine"
+            echo "  4. ⏹️  Stop Virtual Machine"
+            echo "  5. 🗑️  Delete Virtual Machine"
+            echo "  6. 📊 VM Details"
+            echo "  7. ℹ️  System Information"
+            echo "  0. ❌ Exit"
+            echo
+            
+            read -p "Enter your choice: " choice
+            
+            case "${choice}" in
+                1) create_vm ;;
+                2) list_vms ;;
+                3) start_vm ;;
+                4) stop_vm ;;
+                5) delete_vm ;;
+                6) show_vm_details ;;
+                7) show_system_info ;;
+                0) 
+                    log_info "Thank you for using ZynexCloud VM Manager"
+                    echo -e "${GREEN}Visit: https://zynexcloud.com${NC}"
+                    exit 0 
+                    ;;
+                *) 
+                    log_error "Invalid option selected"
+                    ;;
+            esac
+            
+            echo
+            read -p "Press Enter to continue..."
+        done
+    else
+        # Command line arguments provided
+        main "$@"
     fi
-    
-    show_main_menu
-}
-
-# Start application
-main "$@"
+fi
