@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # =============================================
-# ZynexCloud VM Manager - Working Version
-# Fixed and Tested
+# ZynexCloud VM Manager
+# All-in-One Working Edition
+# Secure • Reliable • Enterprise Ready
 # =============================================
 
 set -e
@@ -37,6 +38,7 @@ declare -A OS_OPTIONS=(
     ["ubuntu22"]="Ubuntu 22.04 LTS|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img|ubuntu|ubuntu"
     ["ubuntu24"]="Ubuntu 24.04 LTS|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img|ubuntu|ubuntu"
     ["debian12"]="Debian 12 Bookworm|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2|debian|debian"
+    ["centos9"]="CentOS Stream 9|https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2|centos|centos"
 )
 
 # Display header
@@ -45,7 +47,7 @@ show_header() {
     echo -e "${PURPLE}${BOLD}"
     echo "╔════════════════════════════════════════╗"
     echo "║           ZynexCloud VM Manager       ║"
-    echo "║             Working Version           ║"
+    echo "║             All-in-One Edition        ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo -e "${CYAN}🚀 Secure • 🛡️ Reliable • 💼 Enterprise Ready${NC}"
@@ -54,80 +56,123 @@ show_header() {
 
 # System checks
 check_system() {
-    log_info "System check kar raha hoon..."
+    log_info "Performing system compatibility check..."
     
     if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
-        log_error "QEMU nahi mila"
-        log_info "Install karo: sudo apt install qemu-system-x86"
+        log_error "QEMU system not found"
+        log_info "Install with: sudo apt install qemu-system-x86"
         return 1
     fi
     
     if ! command -v qemu-img >/dev/null 2>&1; then
-        log_error "qemu-img nahi mila"
+        log_error "qemu-img not found"
         return 1
     fi
     
     if ! command -v wget >/dev/null 2>&1; then
-        log_error "wget nahi mila"
+        log_error "wget not found"
         return 1
     fi
     
-    log_success "System check complete"
+    log_success "System check completed"
     return 0
 }
 
 # OS Selection Menu
 select_os() {
-    echo -e "${CYAN}Available Operating Systems:${NC}"
+    echo -e "${CYAN}🏢 Available Operating Systems:${NC}"
+    echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+    
     local i=1
     for os_key in "${!OS_OPTIONS[@]}"; do
         IFS='|' read -r os_name os_url os_user os_pass <<< "${OS_OPTIONS[$os_key]}"
-        echo "  $i. $os_name"
+        
+        local os_icon="🐧"
+        case "$os_key" in
+            ubuntu*) os_icon="🟠" ;;
+            debian*) os_icon="🔴" ;;
+            centos*) os_icon="🟡" ;;
+        esac
+        
+        printf "${CYAN}│${NC} %2d. %s %-25s ${CYAN}│${NC}\n" "${i}" "${os_icon}" "${os_name}"
         ((i++))
     done
     
+    echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+    echo
+    
     while true; do
-        read -p "OS select karo (1-$((i-1))): " os_choice
-        if [[ "$os_choice" =~ ^[0-9]+$ ]] && [ "$os_choice" -ge 1 ] && [ "$os_choice" -le $((i-1)) ]; then
-            local selected_os=$(echo "${!OS_OPTIONS[@]}" | cut -d' ' -f"$os_choice")
+        read -p "Select OS (1-$((i-1))): " os_choice
+        if [[ "${os_choice}" =~ ^[0-9]+$ ]] && [ "${os_choice}" -ge 1 ] && [ "${os_choice}" -le $((i-1)) ]; then
+            local selected_os=$(echo "${!OS_OPTIONS[@]}" | cut -d' ' -f"${os_choice}")
             IFS='|' read -r os_name os_url os_user os_pass <<< "${OS_OPTIONS[$selected_os]}"
             
-            VM_OS_NAME="$os_name"
-            VM_OS_URL="$os_url"
-            VM_OS_USER="$os_user"
-            VM_OS_PASS="$os_pass"
-            VM_OS_KEY="$selected_os"
+            VM_OS_NAME="${os_name}"
+            VM_OS_URL="${os_url}"
+            VM_OS_USER="${os_user}"
+            VM_OS_PASS="${os_pass}"
+            VM_OS_KEY="${selected_os}"
             
-            log_success "Selected: $VM_OS_NAME"
+            log_success "Selected: ${VM_OS_NAME}"
             return 0
         else
-            log_error "Galat selection"
+            log_error "Invalid selection"
         fi
     done
+}
+
+# Download OS image if needed
+download_os_image() {
+    local os_key="$1"
+    local image_file="${OS_IMAGES_DIR}/${os_key}.qcow2"
+    
+    if [ -f "${image_file}" ]; then
+        log_info "OS image already exists: ${os_key}"
+        echo "${image_file}"
+        return 0
+    fi
+    
+    IFS='|' read -r os_name os_url os_user os_pass <<< "${OS_OPTIONS[$os_key]}"
+    
+    log_info "Downloading ${os_name}..."
+    log_info "URL: ${os_url}"
+    
+    if wget --progress=bar:force -O "${image_file}.tmp" "${os_url}"; then
+        mv "${image_file}.tmp" "${image_file}"
+        log_success "Download completed: ${os_name}"
+        echo "${image_file}"
+        return 0
+    else
+        log_error "Failed to download OS image"
+        rm -f "${image_file}.tmp"
+        return 1
+    fi
 }
 
 # Create new VM
 create_vm() {
     show_header
-    log_info "Naya VM bana raha hoon..."
+    log_info "Virtual Machine Creation Wizard"
+    echo
     
     # OS Selection
     if ! select_os; then
         return 1
     fi
+    echo
     
     # VM Name
     while true; do
-        read -p "VM ka naam dalo: " vm_name
-        vm_name=$(echo "$vm_name" | tr -cd '[:alnum:]-_')
+        read -p "Enter VM name: " vm_name
+        vm_name=$(echo "${vm_name}" | tr -cd '[:alnum:]-_')
         
-        if [ -z "$vm_name" ]; then
-            log_error "Naam khali nahi ho sakta"
+        if [ -z "${vm_name}" ]; then
+            log_error "VM name cannot be empty"
             continue
         fi
         
-        if [ -d "$VM_DIR/$vm_name" ]; then
-            log_error "VM '$vm_name' pehle se hai"
+        if [ -d "${VM_DIR}/${vm_name}" ]; then
+            log_error "VM '${vm_name}' already exists"
             continue
         fi
         
@@ -135,9 +180,9 @@ create_vm() {
     done
     
     # Create VM directory
-    mkdir -p "$VM_DIR/$vm_name"
+    mkdir -p "${VM_DIR}/${vm_name}"
     
-    # VM specifications
+    # Get VM specifications
     read -p "Memory (MB) [2048]: " vm_ram
     vm_ram=${vm_ram:-2048}
     
@@ -150,127 +195,242 @@ create_vm() {
     read -p "SSH port [2222]: " vm_ssh_port
     vm_ssh_port=${vm_ssh_port:-2222}
     
-    vm_user="$VM_OS_USER"
-    vm_password="$VM_OS_PASS"
+    vm_user="${VM_OS_USER}"
+    vm_password="${VM_OS_PASS}"
+    
+    # Validate port availability
+    if netstat -tuln 2>/dev/null | grep -q ":${vm_ssh_port} "; then
+        log_error "Port ${vm_ssh_port} is already in use"
+        return 1
+    fi
+    
+    # Download OS image
+    log_info "Preparing OS image..."
+    local base_image=$(download_os_image "${VM_OS_KEY}")
+    if [ $? -ne 0 ]; then
+        log_error "Failed to prepare OS image"
+        return 1
+    fi
     
     # Create disk image
-    log_info "Disk image bana raha hoon ($vm_disk GB)..."
-    local disk_file="$VM_DIR/$vm_name/disk.qcow2"
+    log_info "Creating disk image (${vm_disk}GB)..."
+    local disk_file="${VM_DIR}/${vm_name}/disk.qcow2"
     
-    if qemu-img create -f qcow2 "$disk_file" "${vm_disk}G" 2>/dev/null; then
-        log_success "Disk ban gaya"
+    # Remove existing file if any
+    rm -f "${disk_file}"
+    
+    # Create disk
+    if qemu-img create -f qcow2 "${disk_file}" "${vm_disk}G" 2>/dev/null; then
+        log_success "Disk created successfully"
     else
-        log_error "Disk nahi bana"
+        log_error "Failed to create disk image"
         return 1
     fi
     
     # Save configuration
-    cat > "$VM_DIR/$vm_name/config.conf" << EOF
-VM_NAME="$vm_name"
-VM_OS_NAME="$VM_OS_NAME"
-VM_OS_KEY="$VM_OS_KEY"
-VM_RAM="$vm_ram"
-VM_DISK="$vm_disk"
-VM_CPUS="$vm_cpus"
-VM_SSH_PORT="$vm_ssh_port"
-VM_USER="$vm_user"
-VM_PASSWORD="$vm_password"
+    local config_file="${VM_DIR}/${vm_name}/config.conf"
+    cat > "${config_file}" << EOF
+VM_NAME="${vm_name}"
+VM_OS_NAME="${VM_OS_NAME}"
+VM_OS_KEY="${VM_OS_KEY}"
+VM_RAM="${vm_ram}"
+VM_DISK="${vm_disk}"
+VM_CPUS="${vm_cpus}"
+VM_SSH_PORT="${vm_ssh_port}"
+VM_USER="${vm_user}"
+VM_PASSWORD="${vm_password}"
+CREATED_TIMESTAMP="$(date +%Y-%m-%d\ %H:%M:%S)"
 EOF
     
-    log_success "VM '$vm_name' successfully bana diya!"
+    # Create cloud-init configuration
+    log_info "Creating cloud-init configuration..."
+    cat > "${VM_DIR}/${vm_name}/user-data" << EOF
+#cloud-config
+hostname: ${vm_name}
+users:
+  - name: ${vm_user}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    passwd: $(echo "${vm_password}" | openssl passwd -6 -stdin)
+ssh_pwauth: true
+disable_root: false
+chpasswd:
+  list: |
+    ${vm_user}:${vm_password}
+    root:${vm_password}
+  expire: false
+EOF
+
+    cat > "${VM_DIR}/${vm_name}/meta-data" << EOF
+instance-id: ${vm_name}
+local-hostname: ${vm_name}
+EOF
+
+    # Create seed image
+    if command -v cloud-localds >/dev/null 2>&1; then
+        cloud-localds "${VM_DIR}/${vm_name}/seed.iso" "${VM_DIR}/${vm_name}/user-data" "${VM_DIR}/${vm_name}/meta-data"
+    fi
+    
+    # Summary
     echo
-    echo "SSH Connect: ssh -p $vm_ssh_port $vm_user@localhost"
-    echo "Username: $vm_user"
-    echo "Password: $vm_password"
+    log_success "Virtual Machine '${vm_name}' created successfully"
+    echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}│${NC} ${BOLD}VM Creation Summary${NC}                     ${CYAN}│${NC}"
+    echo -e "${CYAN}├──────────────────────────────────────────┤${NC}"
+    
+    local os_icon="🐧"
+    case "${VM_OS_KEY}" in
+        ubuntu*) os_icon="🟠" ;;
+        debian*) os_icon="🔴" ;;
+        centos*) os_icon="🟡" ;;
+    esac
+    
+    echo -e "${CYAN}│${NC} ${os_icon} OS: ${VM_OS_NAME}                  ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 💾 Memory: ${vm_ram}MB                          ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 💿 Storage: ${vm_disk}GB                         ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} ⚡ CPU Cores: ${vm_cpus}                          ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 🔗 SSH Port: ${vm_ssh_port}                       ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 👤 Username: ${vm_user}                      ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 🔐 Password: ${vm_password}                   ${CYAN}│${NC}"
+    echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+    echo
+    log_info "Use 'Start VM' option to launch your virtual machine"
 }
 
 # List all VMs
 list_vms() {
     show_header
-    log_info "Saare VMs dikha raha hoon..."
+    log_info "Virtual Machine Inventory"
+    echo
     
-    local vms=($(find "$VM_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
+    local vms=($(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
     
     if [ ${#vms[@]} -eq 0 ]; then
-        log_warning "Koi VM nahi mila"
+        log_warning "No virtual machines found"
         return
     fi
     
-    echo -e "${CYAN}VM Name            Status    OS${NC}"
-    echo "----------------------------------------"
+    echo -e "${CYAN}┌─────────────────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}│${NC} ${BOLD}VM Name${NC}             ${BOLD}Status${NC}    ${BOLD}OS${NC}           ${BOLD}Resources${NC}   ${CYAN}│${NC}"
+    echo -e "${CYAN}├─────────────────────────────────────────────────────┤${NC}"
     
     for vm in "${vms[@]}"; do
-        if [ -f "$VM_DIR/$vm/config.conf" ]; then
-            source "$VM_DIR/$vm/config.conf"
-            local status="🔴 STOPPED"
-            if pgrep -f "qemu.*$vm" >/dev/null; then
-                status="🟢 RUNNING"
+        if [ -f "${VM_DIR}/${vm}/config.conf" ]; then
+            source "${VM_DIR}/${vm}/config.conf"
+            local status_icon="🔴"
+            local status_text="STOPPED"
+            
+            if pgrep -f "qemu.*${vm}" >/dev/null; then
+                status_icon="🟢"
+                status_text="RUNNING"
             fi
-            echo " $vm       $status   $VM_OS_NAME"
+            
+            local os_icon="🐧"
+            case "${VM_OS_KEY}" in
+                ubuntu*) os_icon="🟠" ;;
+                debian*) os_icon="🔴" ;;
+                centos*) os_icon="🟡" ;;
+            esac
+            
+            printf "${CYAN}│${NC} %-18s ${status_icon} %-6s ${os_icon} %-9s %-10s ${CYAN}│${NC}\n" \
+                "${vm}" "${status_text}" "${VM_OS_NAME:0:9}" "${VM_CPUS}C/${VM_RAM}MB"
         fi
     done
+    
+    echo -e "${CYAN}└─────────────────────────────────────────────────────┘${NC}"
+    echo
+    log_info "Total: ${#vms[@]} virtual machine(s)"
 }
 
 # Start VM
 start_vm() {
     show_header
     
-    local vms=($(find "$VM_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
+    local vms=($(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
     
     if [ ${#vms[@]} -eq 0 ]; then
-        log_error "Koi VM available nahi hai"
+        log_error "No virtual machines available"
         return
     fi
     
-    log_info "Available VMs:"
+    log_info "Available Virtual Machines:"
     for i in "${!vms[@]}"; do
         local status="(stopped)"
         if pgrep -f "qemu.*${vms[i]}" >/dev/null; then
             status="(running)"
         fi
-        echo "  $((i+1)). ${vms[i]} $status"
+        echo "  $((i+1)). ${vms[i]} ${status}"
     done
+    echo
     
-    read -p "Kaun sa VM start karna hai: " selection
+    read -p "Select VM to start: " selection
+    
     local vm_name="${vms[$((selection-1))]}"
     
-    if [ ! -f "$VM_DIR/$vm_name/config.conf" ]; then
-        log_error "VM configuration nahi mili"
+    if [ ! -f "${VM_DIR}/${vm_name}/config.conf" ]; then
+        log_error "VM configuration not found"
         return
     fi
     
-    source "$VM_DIR/$vm_name/config.conf"
-    local disk_file="$VM_DIR/$vm_name/disk.qcow2"
+    source "${VM_DIR}/${vm_name}/config.conf"
+    local disk_file="${VM_DIR}/${vm_name}/disk.qcow2"
     
-    # Check if already running
-    if pgrep -f "qemu.*$vm_name" >/dev/null; then
-        log_warning "VM '$vm_name' already running hai"
+    # Check if VM is already running
+    if pgrep -f "qemu.*${vm_name}" >/dev/null; then
+        log_warning "VM '${vm_name}' is already running"
         return
     fi
     
-    log_info "VM '$vm_name' start kar raha hoon..."
+    log_info "Starting virtual machine: ${vm_name}"
     
-    # Start QEMU
-    qemu-system-x86_64 \
-        -enable-kvm \
-        -name "$vm_name" \
-        -m "$VM_RAM" \
-        -smp "$VM_CPUS" \
-        -drive "file=$disk_file,format=qcow2,if=virtio" \
-        -netdev "user,id=net0,hostfwd=tcp::$VM_SSH_PORT-:22" \
-        -device "virtio-net-pci,netdev=net0" \
-        -boot c \
-        -display none \
-        -daemonize
-    
-    sleep 2
-    
-    if pgrep -f "qemu.*$vm_name" >/dev/null; then
-        log_success "VM '$vm_name' successfully start ho gaya!"
-        echo
-        echo "SSH Connect: ssh -p $VM_SSH_PORT $VM_USER@localhost"
+    # Start QEMU instance
+    if [ -f "${VM_DIR}/${vm_name}/seed.iso" ]; then
+        # With cloud-init
+        qemu-system-x86_64 \
+            -enable-kvm \
+            -name "${vm_name}" \
+            -m "${VM_RAM}" \
+            -smp "${VM_CPUS}" \
+            -drive "file=${disk_file},format=qcow2,if=virtio" \
+            -drive "file=${VM_DIR}/${vm_name}/seed.iso,format=raw,if=virtio" \
+            -netdev "user,id=net0,hostfwd=tcp::${VM_SSH_PORT}-:22" \
+            -device "virtio-net-pci,netdev=net0" \
+            -boot c \
+            -display none \
+            -daemonize
     else
-        log_error "VM start nahi hua"
+        # Without cloud-init
+        qemu-system-x86_64 \
+            -enable-kvm \
+            -name "${vm_name}" \
+            -m "${VM_RAM}" \
+            -smp "${VM_CPUS}" \
+            -drive "file=${disk_file},format=qcow2,if=virtio" \
+            -netdev "user,id=net0,hostfwd=tcp::${VM_SSH_PORT}-:22" \
+            -device "virtio-net-pci,netdev=net0" \
+            -boot c \
+            -display none \
+            -daemonize
+    fi
+    
+    # Wait a moment for VM to start
+    sleep 3
+    
+    # Check if VM started successfully
+    if pgrep -f "qemu.*${vm_name}" >/dev/null; then
+        log_success "VM '${vm_name}' started successfully"
+        echo
+        echo -e "${CYAN}🔗 Connection Details:${NC}"
+        echo "  SSH: ssh -p ${VM_SSH_PORT} ${VM_USER}@localhost"
+        echo "  Username: ${VM_USER}"
+        echo "  Password: ${VM_PASSWORD}"
+        echo "  OS: ${VM_OS_NAME}"
+        echo "  Status: 🟢 Running in background"
+        echo
+        echo -e "${YELLOW}💡 Tip: Use 'ssh -p ${VM_SSH_PORT} ${VM_USER}@localhost' to connect${NC}"
+    else
+        log_error "Failed to start VM '${vm_name}'"
     fi
 }
 
@@ -278,99 +438,201 @@ start_vm() {
 stop_vm() {
     show_header
     
-    local vms=($(find "$VM_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
+    local vms=($(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
     
     if [ ${#vms[@]} -eq 0 ]; then
-        log_error "Koi VM available nahi hai"
+        log_error "No virtual machines available"
         return
     fi
     
-    log_info "Available VMs:"
+    log_info "Available Virtual Machines:"
     for i in "${!vms[@]}"; do
         local status="🔴 stopped"
         if pgrep -f "qemu.*${vms[i]}" >/dev/null; then
             status="🟢 running"
         fi
-        echo "  $((i+1)). ${vms[i]} $status"
+        echo "  $((i+1)). ${vms[i]} ${status}"
     done
+    echo
     
-    read -p "Kaun sa VM stop karna hai: " selection
+    read -p "Select VM to stop: " selection
+    
     local vm_name="${vms[$((selection-1))]}"
     
-    log_info "VM '$vm_name' stop kar raha hoon..."
+    log_info "Stopping virtual machine: ${vm_name}"
     
-    local pids=$(pgrep -f "qemu.*$vm_name" 2>/dev/null || true)
+    # Find and terminate QEMU process
+    local pids=$(pgrep -f "qemu.*${vm_name}" 2>/dev/null || true)
     
-    if [ -z "$pids" ]; then
-        log_warning "VM '$vm_name' running nahi hai"
+    if [ -z "${pids}" ]; then
+        log_warning "VM '${vm_name}' is not running"
         return
     fi
     
-    kill $pids 2>/dev/null && sleep 2
+    # Send termination signal
+    kill ${pids} 2>/dev/null && sleep 2
     
-    if pgrep -f "qemu.*$vm_name" >/dev/null; then
-        kill -9 $pids 2>/dev/null
+    # Force kill if still running
+    if pgrep -f "qemu.*${vm_name}" >/dev/null; then
+        log_warning "Force terminating VM process"
+        kill -9 ${pids} 2>/dev/null
     fi
     
-    log_success "VM '$vm_name' stop ho gaya"
+    log_success "VM '${vm_name}' stopped successfully"
 }
 
-# Main menu
-show_main_menu() {
-    while true; do
-        show_header
-        
-        local total_vms=$(find "$VM_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)
-        local running_vms=$(pgrep -f "qemu-system" | wc -l)
-        
-        echo -e "${CYAN}System Status: $total_vms VMs total, $running_vms running${NC}"
-        echo
-        
-        echo "1. 🆕 Naya VM Banao"
-        echo "2. 📋 Saare VMs Dikhao" 
-        echo "3. 🚀 VM Start Karo"
-        echo "4. ⏹️  VM Stop Karo"
-        echo "5. 🗑️  VM Delete Karo"
-        echo "0. ❌ Exit"
-        echo
-        
-        read -p "Apna choice dalo: " choice
-        
-        case "$choice" in
-            1) create_vm ;;
-            2) list_vms ;;
-            3) start_vm ;;
-            4) stop_vm ;;
-            5) delete_vm ;;
-            0) 
-                log_info "ZynexCloud VM Manager use karne ke liye dhanyawaad!"
-                exit 0 
-                ;;
-            *) 
-                log_error "Galat choice"
-                ;;
-        esac
-        
-        echo
-        read -p "Continue karne ke liye Enter dabaye..."
+# Delete VM
+delete_vm() {
+    show_header
+    
+    local vms=($(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
+    
+    if [ ${#vms[@]} -eq 0 ]; then
+        log_error "No virtual machines available"
+        return
+    fi
+    
+    log_info "Available Virtual Machines:"
+    for i in "${!vms[@]}"; do
+        echo "  $((i+1)). ${vms[i]}"
     done
+    echo
+    
+    read -p "Select VM to delete: " selection
+    
+    local vm_name="${vms[$((selection-1))]}"
+    
+    # Confirm deletion
+    echo
+    log_warning "⚠️  WARNING: This will permanently delete VM '${vm_name}' and all its data"
+    read -p "Type 'DELETE' to proceed: " confirmation
+    
+    if [ "${confirmation}" != "DELETE" ]; then
+        log_info "Deletion cancelled"
+        return
+    fi
+    
+    # Stop VM if running
+    local pids=$(pgrep -f "qemu.*${vm_name}" 2>/dev/null || true)
+    if [ -n "${pids}" ]; then
+        log_info "Stopping running VM instance"
+        kill ${pids} 2>/dev/null
+        sleep 2
+    fi
+    
+    # Remove VM directory
+    if rm -rf "${VM_DIR}/${vm_name}"; then
+        log_success "VM '${vm_name}' deleted successfully"
+    else
+        log_error "Failed to delete VM '${vm_name}'"
+    fi
+}
+
+# VM Details
+show_vm_details() {
+    show_header
+    
+    local vms=($(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
+    
+    if [ ${#vms[@]} -eq 0 ]; then
+        log_error "No virtual machines available"
+        return
+    fi
+    
+    log_info "Available Virtual Machines:"
+    for i in "${!vms[@]}"; do
+        echo "  $((i+1)). ${vms[i]}"
+    done
+    echo
+    
+    read -p "Select VM for details: " selection
+    
+    local vm_name="${vms[$((selection-1))]}"
+    
+    if [ ! -f "${VM_DIR}/${vm_name}/config.conf" ]; then
+        log_error "VM configuration not found"
+        return
+    fi
+    
+    source "${VM_DIR}/${vm_name}/config.conf"
+    
+    echo
+    echo -e "${CYAN}📋 VM Details: ${vm_name}${NC}"
+    echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+    
+    local os_icon="🐧"
+    case "${VM_OS_KEY}" in
+        ubuntu*) os_icon="🟠" ;;
+        debian*) os_icon="🔴" ;;
+        centos*) os_icon="🟡" ;;
+    esac
+    
+    echo -e "${CYAN}│${NC} ${os_icon} OS: ${VM_OS_NAME}                     ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 💾 Memory: ${VM_RAM}MB                           ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 💿 Storage: ${VM_DISK}GB                          ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} ⚡ CPU Cores: ${VM_CPUS}                           ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 🔗 SSH Port: ${VM_SSH_PORT}                        ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 👤 Username: ${VM_USER}                         ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 🔐 Password: ${VM_PASSWORD}                     ${CYAN}│${NC}"
+    echo -e "${CYAN}│${NC} 📅 Created: ${CREATED_TIMESTAMP}        ${CYAN}│${NC}"
+    
+    if pgrep -f "qemu.*${vm_name}" >/dev/null; then
+        echo -e "${CYAN}│${NC} 🟢 Status: RUNNING                            ${CYAN}│${NC}"
+        echo -e "${CYAN}│${NC} 🔗 Connect: ssh -p ${VM_SSH_PORT} ${VM_USER}@localhost ${CYAN}│${NC}"
+    else
+        echo -e "${CYAN}│${NC} 🔴 Status: STOPPED                            ${CYAN}│${NC}"
+    fi
+    echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+}
+
+# System information
+show_system_info() {
+    show_header
+    log_info "System Overview"
+    echo
+    
+    # VM statistics
+    local total_vms=$(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d | wc -l)
+    local running_vms=$(pgrep -f "qemu-system" | wc -l)
+    
+    # Disk usage
+    local disk_usage=$(du -sh "${VM_DIR}" 2>/dev/null | cut -f1)
+    
+    echo -e "${CYAN}📊 Virtualization Environment:${NC}"
+    echo "  🖥️  Total VMs: ${total_vms}"
+    echo "  🟢 Running VMs: ${running_vms}"
+    echo "  💾 Storage Usage: ${disk_usage:-0B}"
+    echo "  📁 VM Directory: ${VM_DIR}"
+    echo
+    
+    # System resources
+    echo -e "${CYAN}⚡ System Resources:${NC}"
+    echo "  💾 Memory: $(free -h | awk '/^Mem:/ {print $3 "/" $2}')"
+    echo "  📈 Load: $(uptime | awk -F'load average:' '{print $2}')"
+    echo "  ⏰ Uptime: $(uptime -p)"
 }
 
 # ISS Command function
 iss() {
     case "$1" in
-        create|start|stop|list|delete|status)
+        create|start|stop|list|delete|status|info)
             main "$@"
             ;;
         *)
             show_header
             echo -e "${CYAN}Usage:${NC}"
-            echo "  iss create    - Naya VM banao"
-            echo "  iss start     - VM start karo"
-            echo "  iss stop      - VM stop karo" 
-            echo "  iss list      - Saare VMs dikhao"
-            echo "  iss delete    - VM delete karo"
-            echo "  iss status    - VM status dikhao"
+            echo "  iss create    - Create new VM"
+            echo "  iss start     - Start VM"
+            echo "  iss stop      - Stop VM" 
+            echo "  iss list      - List all VMs"
+            echo "  iss delete    - Delete VM"
+            echo "  iss status    - Show VM status"
+            echo "  iss info      - System information"
+            echo ""
+            echo -e "${YELLOW}Examples:${NC}"
+            echo "  iss create    # Interactive VM creation"
+            echo "  iss start     # Start a VM"
+            echo "  iss list      # List all virtual machines"
             ;;
     esac
 }
@@ -386,60 +648,68 @@ main() {
         list) list_vms ;;
         delete) delete_vm ;;
         status) list_vms ;;
+        info) show_system_info ;;
         *) show_main_menu ;;
     esac
 }
 
-# Delete VM function
-delete_vm() {
-    show_header
-    
-    local vms=($(find "$VM_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
-    
-    if [ ${#vms[@]} -eq 0 ]; then
-        log_error "Koi VM available nahi hai"
-        return
-    fi
-    
-    log_info "Available VMs:"
-    for i in "${!vms[@]}"; do
-        echo "  $((i+1)). ${vms[i]}"
+# Main menu
+show_main_menu() {
+    while true; do
+        show_header
+        
+        # Quick status
+        local total_vms=$(find "${VM_DIR}" -mindepth 1 -maxdepth 1 -type d | wc -l)
+        local running_vms=$(pgrep -f "qemu-system" | wc -l)
+        
+        echo -e "${CYAN}📊 System Status: ${total_vms} VMs total, ${running_vms} running${NC}"
+        echo
+        
+        echo -e "${BOLD}🎯 Management Options:${NC}"
+        echo "  1. 🆕 Create Virtual Machine"
+        echo "  2. 📋 List Virtual Machines" 
+        echo "  3. 🚀 Start Virtual Machine"
+        echo "  4. ⏹️  Stop Virtual Machine"
+        echo "  5. 🗑️  Delete Virtual Machine"
+        echo "  6. 📊 VM Details"
+        echo "  7. ℹ️  System Information"
+        echo "  0. ❌ Exit"
+        echo
+        
+        read -p "Enter your choice: " choice
+        
+        case "${choice}" in
+            1) create_vm ;;
+            2) list_vms ;;
+            3) start_vm ;;
+            4) stop_vm ;;
+            5) delete_vm ;;
+            6) show_vm_details ;;
+            7) show_system_info ;;
+            0) 
+                log_info "Thank you for using ZynexCloud VM Manager"
+                echo -e "${GREEN}Visit: https://zynexcloud.com${NC}"
+                exit 0 
+                ;;
+            *) 
+                log_error "Invalid option selected"
+                ;;
+        esac
+        
+        echo
+        read -p "Press Enter to continue..."
     done
-    
-    read -p "Kaun sa VM delete karna hai: " selection
-    local vm_name="${vms[$((selection-1))]}"
-    
-    echo
-    log_warning "WARNING: Ye VM '$vm_name' permanently delete ho jayega"
-    read -p "Confirm karne ke liye 'DELETE' likho: " confirmation
-    
-    if [ "$confirmation" != "DELETE" ]; then
-        log_info "Delete cancel ho gaya"
-        return
-    fi
-    
-    # Stop VM if running
-    local pids=$(pgrep -f "qemu.*$vm_name" 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        log_info "Running VM ko stop kar raha hoon"
-        kill $pids 2>/dev/null
-        sleep 2
-    fi
-    
-    # Remove VM directory
-    if rm -rf "$VM_DIR/$vm_name"; then
-        log_success "VM '$vm_name' delete ho gaya"
-    else
-        log_error "VM delete nahi hua"
-    fi
 }
 
-# Start application
+# Initialize and start
 if [ $# -eq 0 ]; then
-    log_info "ZynexCloud VM Manager start ho raha hai..."
+    log_info "Initializing ZynexCloud VM Management System"
+    
     if ! check_system; then
-        log_error "System check fail hua"
+        log_error "System compatibility check failed"
+        log_info "Running in limited mode - some features may not work"
     fi
+    
     show_main_menu
 else
     main "$@"
