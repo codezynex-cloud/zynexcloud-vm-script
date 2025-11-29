@@ -2,7 +2,7 @@
 
 # =============================================
 # ZynexCloud Virtual Machine Manager
-# Professional Edition v3.0
+# Professional Edition v3.1
 # Secure • Reliable • Enterprise Ready
 # =============================================
 
@@ -37,7 +37,9 @@ log_error() { echo -e "${RED}❌ ${NC} $1"; }
 declare -A OS_OPTIONS=(
     ["ubuntu22"]="Ubuntu 22.04 LTS|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img|ubuntu|ubuntu"
     ["ubuntu24"]="Ubuntu 24.04 LTS|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img|ubuntu|ubuntu"
-    ["debian12"]="Debian 12|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2|debian|debian"
+    ["debian11"]="Debian 11 Bullseye|https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2|debian|debian"
+    ["debian12"]="Debian 12 Bookworm|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2|debian|debian"
+    ["kali"]="Kali Linux|https://cdimage.kali.org/kali-2024.2/kali-linux-2024.2-qemu-amd64.qcow2|kali|kali"
     ["centos9"]="CentOS Stream 9|https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2|centos|centos"
     ["alma9"]="AlmaLinux 9|https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2|alma|alma"
     ["rocky9"]="Rocky Linux 9|https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2|rocky|rocky"
@@ -70,7 +72,7 @@ show_header() {
     echo -e "${PURPLE}${BOLD}"
     echo "╔════════════════════════════════════════╗"
     echo "║           ZynexCloud VM Manager       ║"
-    echo "║             Professional v3.0         ║"
+    echo "║             Professional v3.1         ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo -e "${CYAN}🚀 Secure • 🛡️ Reliable • 💼 Enterprise Ready${NC}"
@@ -85,7 +87,19 @@ select_os() {
     local i=1
     for os_key in "${!OS_OPTIONS[@]}"; do
         IFS='|' read -r os_name os_url os_user os_pass <<< "${OS_OPTIONS[$os_key]}"
-        printf "${CYAN}│${NC} %2d. %-30s ${CYAN}│${NC}\n" "${i}" "${os_name}"
+        
+        # Add icons for different OS types
+        local os_icon="🐧"
+        case "$os_key" in
+            ubuntu*) os_icon="🟠" ;;
+            debian*) os_icon="🔴" ;;
+            kali*) os_icon="⚫" ;;
+            centos*) os_icon="🟡" ;;
+            alma*) os_icon="🔵" ;;
+            rocky*) os_icon="🟢" ;;
+        esac
+        
+        printf "${CYAN}│${NC} %2d. %s %-25s ${CYAN}│${NC}\n" "${i}" "${os_icon}" "${os_name}"
         ((i++))
     done
     
@@ -127,6 +141,11 @@ download_os_image() {
     
     log_info "Downloading ${os_name}..."
     log_info "URL: ${os_url}"
+    
+    # Show download progress for larger files
+    if [[ "$os_key" == "kali" ]]; then
+        log_warning "Kali Linux is a large download (~3GB). This may take a while..."
+    fi
     
     if wget --progress=bar:force -O "${image_file}.tmp" "${os_url}"; then
         mv "${image_file}.tmp" "${image_file}"
@@ -256,12 +275,32 @@ create_vm() {
     echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
     echo -e "${CYAN}│${NC} ${BOLD}VM Creation Summary${NC}                     ${CYAN}│${NC}"
     echo -e "${CYAN}├──────────────────────────────────────────┤${NC}"
-    echo -e "${CYAN}│${NC} 🖥️  OS: ${VM_OS_NAME}                  ${CYAN}│${NC}"
+    
+    # OS-specific icon
+    local os_icon="🐧"
+    case "${VM_OS_KEY}" in
+        ubuntu*) os_icon="🟠" ;;
+        debian*) os_icon="🔴" ;;
+        kali*) os_icon="⚫" ;;
+        centos*) os_icon="🟡" ;;
+        alma*) os_icon="🔵" ;;
+        rocky*) os_icon="🟢" ;;
+    esac
+    
+    echo -e "${CYAN}│${NC} ${os_icon} OS: ${VM_OS_NAME}                  ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} 💾 Memory: ${vm_ram}MB                          ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} 💿 Storage: ${vm_disk}GB                         ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ⚡ CPU Cores: ${vm_cpus}                          ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} 🔗 SSH Port: ${vm_ssh_port}                       ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} 👤 Username: ${vm_user}                      ${CYAN}│${NC}"
+    
+    # Special notes for specific OS
+    if [[ "${VM_OS_KEY}" == "kali" ]]; then
+        echo -e "${CYAN}│${NC} ⚠️  Kali: Large download complete           ${CYAN}│${NC}"
+    elif [[ "${VM_OS_KEY}" == "debian11" ]]; then
+        echo -e "${CYAN}│${NC} 📅 Debian 11: Stable LTS release            ${CYAN}│${NC}"
+    fi
+    
     echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 }
 
@@ -292,8 +331,19 @@ list_vms() {
                 status_text="RUNNING"
             fi
             
-            echo -e "${CYAN}│${NC} %-18s ${status_icon} %-6s %-12s %-10s ${CYAN}│${NC}" \
-                "${vm}" "${status_text}" "${VM_OS_NAME:0:12}" "${VM_CPUS}C/${VM_RAM}MB"
+            # OS icon
+            local os_icon="🐧"
+            case "${VM_OS_KEY}" in
+                ubuntu*) os_icon="🟠" ;;
+                debian*) os_icon="🔴" ;;
+                kali*) os_icon="⚫" ;;
+                centos*) os_icon="🟡" ;;
+                alma*) os_icon="🔵" ;;
+                rocky*) os_icon="🟢" ;;
+            esac
+            
+            echo -e "${CYAN}│${NC} %-18s ${status_icon} %-6s ${os_icon} %-9s %-10s ${CYAN}│${NC}" \
+                "${vm}" "${status_text}" "${VM_OS_NAME:0:9}" "${VM_CPUS}C/${VM_RAM}MB"
         fi
     done
     
@@ -551,7 +601,19 @@ show_vm_details() {
     echo
     echo -e "${CYAN}📋 VM Details: ${vm_name}${NC}"
     echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}│${NC} 🖥️  OS: ${VM_OS_NAME}                     ${CYAN}│${NC}"
+    
+    # OS icon
+    local os_icon="🐧"
+    case "${VM_OS_KEY}" in
+        ubuntu*) os_icon="🟠" ;;
+        debian*) os_icon="🔴" ;;
+        kali*) os_icon="⚫" ;;
+        centos*) os_icon="🟡" ;;
+        alma*) os_icon="🔵" ;;
+        rocky*) os_icon="🟢" ;;
+    esac
+    
+    echo -e "${CYAN}│${NC} ${os_icon} OS: ${VM_OS_NAME}                     ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} 💾 Memory: ${VM_RAM}MB                           ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} 💿 Storage: ${VM_DISK}GB                          ${CYAN}│${NC}"
     echo -e "${CYAN}│${NC} ⚡ CPU Cores: ${VM_CPUS}                           ${CYAN}│${NC}"
