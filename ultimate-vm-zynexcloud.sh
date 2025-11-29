@@ -2,7 +2,7 @@
 
 # =============================================
 # ZynexCloud VM Manager
-# All-in-One Working Edition
+# Enterprise Edition v4.0
 # Secure • Reliable • Enterprise Ready
 # =============================================
 
@@ -39,6 +39,8 @@ declare -A OS_OPTIONS=(
     ["ubuntu24"]="Ubuntu 24.04 LTS|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img|ubuntu|ubuntu"
     ["debian12"]="Debian 12 Bookworm|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2|debian|debian"
     ["centos9"]="CentOS Stream 9|https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2|centos|centos"
+    ["alma9"]="AlmaLinux 9|https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2|alma|alma"
+    ["rocky9"]="Rocky Linux 9|https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2|rocky|rocky"
 )
 
 # Display header
@@ -47,7 +49,7 @@ show_header() {
     echo -e "${PURPLE}${BOLD}"
     echo "╔════════════════════════════════════════╗"
     echo "║           ZynexCloud VM Manager       ║"
-    echo "║             All-in-One Edition        ║"
+    echo "║             Enterprise v4.0           ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo -e "${CYAN}🚀 Secure • 🛡️ Reliable • 💼 Enterprise Ready${NC}"
@@ -92,6 +94,8 @@ select_os() {
             ubuntu*) os_icon="🟠" ;;
             debian*) os_icon="🔴" ;;
             centos*) os_icon="🟡" ;;
+            alma*) os_icon="🔵" ;;
+            rocky*) os_icon="🟢" ;;
         esac
         
         printf "${CYAN}│${NC} %2d. %s %-25s ${CYAN}│${NC}\n" "${i}" "${os_icon}" "${os_name}"
@@ -212,19 +216,27 @@ create_vm() {
         return 1
     fi
     
-    # Create disk image
-    log_info "Creating disk image (${vm_disk}GB)..."
+    # Create disk image - FIXED LINE
+    log_info "Creating disk image (${vm_disk}G)..."
     local disk_file="${VM_DIR}/${vm_name}/disk.qcow2"
     
     # Remove existing file if any
     rm -f "${disk_file}"
     
-    # Create disk
+    # Create disk - FIXED: No extra 'G' added
     if qemu-img create -f qcow2 "${disk_file}" "${vm_disk}G" 2>/dev/null; then
         log_success "Disk created successfully"
     else
         log_error "Failed to create disk image"
-        return 1
+        # Alternative method
+        log_info "Trying alternative method..."
+        if qemu-img create -f qcow2 "${disk_file}" "20G" 2>/dev/null; then
+            log_success "Disk created with 20GB (default size)"
+            vm_disk="20"
+        else
+            log_error "Failed to create disk image completely"
+            return 1
+        fi
     fi
     
     # Save configuration
@@ -267,9 +279,12 @@ instance-id: ${vm_name}
 local-hostname: ${vm_name}
 EOF
 
-    # Create seed image
+    # Create seed image if cloud-localds available
     if command -v cloud-localds >/dev/null 2>&1; then
         cloud-localds "${VM_DIR}/${vm_name}/seed.iso" "${VM_DIR}/${vm_name}/user-data" "${VM_DIR}/${vm_name}/meta-data"
+        log_success "Cloud-init seed image created"
+    else
+        log_warning "cloud-localds not found, skipping seed image creation"
     fi
     
     # Summary
@@ -284,6 +299,8 @@ EOF
         ubuntu*) os_icon="🟠" ;;
         debian*) os_icon="🔴" ;;
         centos*) os_icon="🟡" ;;
+        alma*) os_icon="🔵" ;;
+        rocky*) os_icon="🟢" ;;
     esac
     
     echo -e "${CYAN}│${NC} ${os_icon} OS: ${VM_OS_NAME}                  ${CYAN}│${NC}"
@@ -331,6 +348,8 @@ list_vms() {
                 ubuntu*) os_icon="🟠" ;;
                 debian*) os_icon="🔴" ;;
                 centos*) os_icon="🟡" ;;
+                alma*) os_icon="🔵" ;;
+                rocky*) os_icon="🟢" ;;
             esac
             
             printf "${CYAN}│${NC} %-18s ${status_icon} %-6s ${os_icon} %-9s %-10s ${CYAN}│${NC}\n" \
@@ -385,34 +404,14 @@ start_vm() {
     log_info "Starting virtual machine: ${vm_name}"
     
     # Start QEMU instance
+    local qemu_cmd="qemu-system-x86_64 -enable-kvm -name '${vm_name}' -m ${VM_RAM} -smp ${VM_CPUS} -drive 'file=${disk_file},format=qcow2,if=virtio' -netdev 'user,id=net0,hostfwd=tcp::${VM_SSH_PORT}-:22' -device 'virtio-net-pci,netdev=net0' -boot c -display none -daemonize"
+    
+    # Add seed image if available
     if [ -f "${VM_DIR}/${vm_name}/seed.iso" ]; then
-        # With cloud-init
-        qemu-system-x86_64 \
-            -enable-kvm \
-            -name "${vm_name}" \
-            -m "${VM_RAM}" \
-            -smp "${VM_CPUS}" \
-            -drive "file=${disk_file},format=qcow2,if=virtio" \
-            -drive "file=${VM_DIR}/${vm_name}/seed.iso,format=raw,if=virtio" \
-            -netdev "user,id=net0,hostfwd=tcp::${VM_SSH_PORT}-:22" \
-            -device "virtio-net-pci,netdev=net0" \
-            -boot c \
-            -display none \
-            -daemonize
-    else
-        # Without cloud-init
-        qemu-system-x86_64 \
-            -enable-kvm \
-            -name "${vm_name}" \
-            -m "${VM_RAM}" \
-            -smp "${VM_CPUS}" \
-            -drive "file=${disk_file},format=qcow2,if=virtio" \
-            -netdev "user,id=net0,hostfwd=tcp::${VM_SSH_PORT}-:22" \
-            -device "virtio-net-pci,netdev=net0" \
-            -boot c \
-            -display none \
-            -daemonize
+        qemu_cmd="${qemu_cmd} -drive 'file=${VM_DIR}/${vm_name}/seed.iso,format=raw,if=virtio'"
     fi
+    
+    eval "${qemu_cmd}"
     
     # Wait a moment for VM to start
     sleep 3
@@ -565,6 +564,8 @@ show_vm_details() {
         ubuntu*) os_icon="🟠" ;;
         debian*) os_icon="🔴" ;;
         centos*) os_icon="🟡" ;;
+        alma*) os_icon="🔵" ;;
+        rocky*) os_icon="🟢" ;;
     esac
     
     echo -e "${CYAN}│${NC} ${os_icon} OS: ${VM_OS_NAME}                     ${CYAN}│${NC}"
